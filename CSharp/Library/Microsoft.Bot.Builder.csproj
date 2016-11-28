@@ -195,6 +195,7 @@
     <EmbeddedResource Include="Resource\Resources.es.resx" />
     <EmbeddedResource Include="Resource\Resources.fa.resx" />
     <EmbeddedResource Include="Resource\Resources.fr.resx" />
+    <EmbeddedResource Include="Resource\Resources.it-IT.resx" />
     <EmbeddedResource Include="Resource\Resources.it.resx" />
     <EmbeddedResource Include="Resource\Resources.ja.resx" />
     <EmbeddedResource Include="Resource\Resources.resx">
@@ -215,6 +216,9 @@
     </XliffResource>
     <XliffResource Include="MultilingualResources\Microsoft.Bot.Builder.fa.xlf" />
     <XliffResource Include="MultilingualResources\Microsoft.Bot.Builder.fr.xlf" />
+    <XliffResource Include="MultilingualResources\Microsoft.Bot.Builder.it-IT.xlf">
+      <SubType>Designer</SubType>
+    </XliffResource>
     <XliffResource Include="MultilingualResources\Microsoft.Bot.Builder.it.xlf">
       <SubType>Designer</SubType>
     </XliffResource>
