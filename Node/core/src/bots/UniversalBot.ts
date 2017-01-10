@@ -31,7 +31,8 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-import { Library, systemLib } from './Library';
+import { Library, systemLib, IRouteResult } from './Library';
+import { IDialogWaterfallStep } from '../dialogs/SimpleDialog';
 import { Session, ISessionMiddleware } from '../Session';
 import { DefaultLocalizer } from '../DefaultLocalizer';
 import { IBotStorage, IBotStorageContext, IBotStorageData, MemoryBotStorage } from '../storage/BotStorage';
@@ -76,6 +77,11 @@ export interface ILookupUser {
     (address: IAddress, done: (err: Error, user: IIdentity) => void): void;
 }
 
+export interface IDisambiguateRouteHandler {
+    (session: Session, routes: IRouteResult[]): void;
+}
+
+
 export class UniversalBot extends Library {
     private settings = <IUniversalBotSettings>{ 
         processLimit: 4, 
@@ -87,20 +93,27 @@ export class UniversalBot extends Library {
     private mwSend = <IEventMiddleware[]>[];
     private mwSession = <ISessionMiddleware[]>[]; 
     private localizer: DefaultLocalizer;
+    private _onDisambiguateRoute: IDisambiguateRouteHandler;
     
-    
-    constructor(connector?: IConnector, settings?: IUniversalBotSettings, libraryName?: string) {
+    constructor(connector: IConnector, settings?: IUniversalBotSettings);
+    constructor(connector: IConnector, defaultDialog?: IDialogWaterfallStep|IDialogWaterfallStep[], libraryName?: string);
+    constructor(connector?: IConnector, defaultDialog?: any, libraryName?: string) {
         super(libraryName || consts.Library.default);
         this.localePath('./locale/');
         this.library(systemLib);
-        if (settings) {
-            for (var name in settings) {
-                if (settings.hasOwnProperty(name)) {
-                    this.set(name, (<any>settings)[name]);
+        if (defaultDialog) {
+            // Check for legacy settings passed in
+            if (typeof defaultDialog === 'function' || Array.isArray(defaultDialog)) {
+                this.dialog('/', defaultDialog);
+            } else {
+                var settings = <IUniversalBotSettings>defaultDialog;
+                for (var name in settings) {
+                    if (settings.hasOwnProperty(name)) {
+                        this.set(name, (<any>settings)[name]);
+                    }
                 }
             }
         }
-
         if (connector) {
             this.connector(consts.defaultConnector, connector);
         }
@@ -315,6 +328,11 @@ export class UniversalBot extends Library {
         }, this.errorLogger(<any>cb));
     }
 
+    /** Lets a developer override the bots default route disambiguation logic. */
+    public onDisambiguateRoute(handler: IDisambiguateRouteHandler): void {
+        this._onDisambiguateRoute = handler;
+    }
+
     //-------------------------------------------------------------------------
     // Helpers
     //-------------------------------------------------------------------------
@@ -421,17 +439,27 @@ export class UniversalBot extends Library {
                 });
             }, (err) => {
                 if (!err) {
-                    // Select the best route
-                    var route = Library.bestRouteResult(results, session.dialogStack(), this.name);
-                    if (route) {
-                        this.library(route.libraryName).selectRoute(session, route);
-                    } else {
-                        // Just let the active dialog process the message
-                        session.routeToActiveDialog();
+                    // Find disambiguation handler to use
+                    var disambiguateRoute: IDisambiguateRouteHandler = (session, routes) => {
+                        var route = Library.bestRouteResult(results, session.dialogStack(), this.name);
+                        if (route) {
+                            this.library(route.libraryName).selectRoute(session, route);
+                        } else {
+                            // Just let the active dialog process the message
+                            session.routeToActiveDialog();
+                        }
+                    };
+                    if (this._onDisambiguateRoute) {
+                        disambiguateRoute = this._onDisambiguateRoute;
                     }
+
+                    // Select best route and dispatch message.
+                    disambiguateRoute(session, results);
+                    done(null);
                 } else {
                     // Let the session process the error
                     session.error(err);
+                    done(err);
                 }
             });
         });

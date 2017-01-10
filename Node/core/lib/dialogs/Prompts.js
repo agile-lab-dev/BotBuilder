@@ -311,6 +311,13 @@ var Prompts = (function (_super) {
         args.prompt = prompt;
         beginPrompt(session, args);
     };
+    Prompts.disambiguate = function (session, prompt, choices, options) {
+        session.beginDialog(consts.DialogId.Disambiguate, {
+            prompt: prompt,
+            choices: choices,
+            options: options
+        });
+    };
     Prompts.options = {
         recognizer: new SimplePromptRecognizer(),
         promptAfterAction: true
@@ -366,6 +373,23 @@ Library_1.systemLib.dialog(consts.DialogId.ConfirmCancel, [
         }
     }
 ]);
+Library_1.systemLib.dialog(consts.DialogId.ConfirmInterruption, [
+    function (session, args) {
+        session.dialogData.dialogId = args.dialogId;
+        session.dialogData.dialogArgs = args.dialogArgs;
+        Prompts.confirm(session, args.confirmPrompt, { localizationNamespace: args.localizationNamespace });
+    },
+    function (session, results) {
+        if (results.response) {
+            var args = session.dialogData;
+            session.clearDialogStack();
+            session.beginDialog(args.dialogId, args.dialogArgs);
+        }
+        else {
+            session.endDialogWithResult({ resumed: Dialog_1.ResumeReason.reprompt });
+        }
+    }
+]);
 Library_1.systemLib.dialog(consts.DialogId.Interruption, [
     function (session, args) {
         if (session.sessionState.callstack.length > 1) {
@@ -377,5 +401,23 @@ Library_1.systemLib.dialog(consts.DialogId.Interruption, [
     },
     function (session, results) {
         session.endDialogWithResult({ resumed: Dialog_1.ResumeReason.reprompt });
+    }
+]);
+Library_1.systemLib.dialog(consts.DialogId.Disambiguate, [
+    function (session, args) {
+        session.dialogData.choices = args.choices;
+        Prompts.choice(session, args.prompt, args.choices, args.options);
+    },
+    function (session, results) {
+        var route = session.dialogData.choices[results.response.entity];
+        if (route) {
+            var stack = session.dialogStack();
+            stack.pop();
+            session.dialogStack(stack);
+            session.library.library(route.libraryName).selectRoute(session, route);
+        }
+        else {
+            session.endDialogWithResult({ resumed: Dialog_1.ResumeReason.reprompt });
+        }
     }
 ]);

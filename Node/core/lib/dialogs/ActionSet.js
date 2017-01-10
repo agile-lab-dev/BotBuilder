@@ -6,8 +6,17 @@ var ActionSet = (function () {
     function ActionSet() {
         this.actions = {};
     }
+    ActionSet.prototype.clone = function (copyTo) {
+        var obj = copyTo || new ActionSet();
+        obj.trigger = this.trigger;
+        for (var name in this.actions) {
+            obj.actions[name] = this.actions[name];
+        }
+        return obj;
+    };
     ActionSet.prototype.addDialogTrigger = function (actions, dialogId) {
         if (this.trigger) {
+            this.trigger.localizationNamespace = dialogId.split(':')[0];
             actions.beginDialogAction(dialogId, dialogId, this.trigger);
         }
     };
@@ -84,7 +93,6 @@ var ActionSet = (function () {
                 addRoute({
                     score: 1.0,
                     libraryName: context.libraryName,
-                    label: options.label || name,
                     routeType: context.routeType,
                     routeData: routeData
                 });
@@ -101,7 +109,6 @@ var ActionSet = (function () {
                             addRoute({
                                 score: score,
                                 libraryName: context.libraryName,
-                                label: entry.options.label || action,
                                 routeType: context.routeType,
                                 routeData: routeData
                             });
@@ -115,7 +122,6 @@ var ActionSet = (function () {
                             addRoute({
                                 score: score,
                                 libraryName: context.libraryName,
-                                label: entry.options.label || name,
                                 routeType: context.routeType,
                                 routeData: routeData
                             });
@@ -141,6 +147,29 @@ var ActionSet = (function () {
         var entry = this.actions[routeData.action];
         if (entry.options.onSelectAction) {
             entry.options.onSelectAction(session, routeData, next);
+        }
+        else {
+            next();
+        }
+    };
+    ActionSet.prototype.dialogInterrupted = function (session, dialogId, dialogArgs) {
+        var trigger = this.trigger;
+        function next() {
+            if (trigger && trigger.confirmPrompt) {
+                session.beginDialog(consts.DialogId.ConfirmInterruption, {
+                    dialogId: dialogId,
+                    dialogArgs: dialogArgs,
+                    confirmPrompt: trigger.confirmPrompt,
+                    localizationNamespace: trigger.localizationNamespace
+                });
+            }
+            else {
+                session.clearDialogStack();
+                session.beginDialog(dialogId, dialogArgs);
+            }
+        }
+        if (trigger && trigger.onInterrupted) {
+            this.trigger.onInterrupted(session, dialogId, dialogArgs, next);
         }
         else {
             next();
@@ -183,7 +212,19 @@ var ActionSet = (function () {
                 var lib = args.dialogId ? args.dialogId.split(':')[0] : args.libraryName;
                 id = lib + ':' + id;
             }
-            session.beginDialog(consts.DialogId.Interruption, { dialogId: id, dialogArgs: args });
+            if (session.sessionState.callstack.length > 0) {
+                if (options.isInterruption) {
+                    var parts = session.sessionState.callstack[0].id.split(':');
+                    var dialog = session.library.findDialog(parts[0], parts[1]);
+                    dialog.dialogInterrupted(session, id, args);
+                }
+                else {
+                    session.beginDialog(consts.DialogId.Interruption, { dialogId: id, dialogArgs: args });
+                }
+            }
+            else {
+                session.beginDialog(id, args);
+            }
         }, options);
     };
     ActionSet.prototype.endConversationAction = function (name, msg, options) {
@@ -205,7 +246,9 @@ var ActionSet = (function () {
         }, options);
     };
     ActionSet.prototype.triggerAction = function (options) {
-        this.trigger = options;
+        this.trigger = (options || {});
+        this.trigger.isInterruption = true;
+        ;
         return this;
     };
     ActionSet.prototype.action = function (name, handler, options) {

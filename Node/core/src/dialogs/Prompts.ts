@@ -36,7 +36,7 @@ import { Dialog, IRecognizeDialogContext, IDialogResult, ResumeReason } from './
 import { Session } from '../Session';
 import { EntityRecognizer } from './EntityRecognizer';
 import { Message } from '../Message';
-import { systemLib } from '../bots/Library';
+import { systemLib, IRouteResult } from '../bots/Library';
 import { Keyboard } from '../cards/Keyboard';
 import { CardAction } from '../cards/CardAction';
 import * as Channel from '../Channel';
@@ -92,6 +92,10 @@ export interface IChronoDuration extends IEntity {
         end?: Date;
         ref?: Date;
     };
+}
+
+export interface IDisambiguateChoices {
+    [label: string]: IRouteResult;
 }
 
 export class SimplePromptRecognizer implements IPromptRecognizer {
@@ -402,6 +406,14 @@ export class Prompts extends Dialog {
         args.prompt = prompt;
         beginPrompt(session, args);
     }
+
+    static disambiguate(session: Session, prompt: string|string[]|IMessage|IIsMessage, choices: IDisambiguateChoices, options?: IPromptOptions): void {
+        session.beginDialog(consts.DialogId.Disambiguate, {
+            prompt: prompt,
+            choices: choices,
+            options: options
+        });
+    }
 }
 systemLib.dialog(consts.DialogId.Prompts, new Prompts());
 
@@ -462,6 +474,33 @@ systemLib.dialog(consts.DialogId.ConfirmCancel, [
 ]);
 
 /**
+ * Internal dialog that prompts a user to confirm a that a root dialog should be
+ * interrupted with a new dialog.
+ * dialogArgs: { 
+ *      localizationNamespace: string;
+ *      confirmPrompt: string; 
+ *      dialogId: string;
+ *      dialogArgs?: any;
+ * }
+ */
+systemLib.dialog(consts.DialogId.ConfirmInterruption, [
+    function (session, args) {
+        session.dialogData.dialogId = args.dialogId;
+        session.dialogData.dialogArgs = args.dialogArgs;
+        Prompts.confirm(session, args.confirmPrompt, { localizationNamespace: args.localizationNamespace });
+    },
+    function (session, results) {
+        if (results.response) {
+            var args = session.dialogData;
+            session.clearDialogStack();
+            session.beginDialog(args.dialogId, args.dialogArgs);
+        } else {
+            session.endDialogWithResult({ resumed: ResumeReason.reprompt });
+        }
+    }
+]);
+
+/**
  * Begins a new dialog as an interruption. If the stack has a depth of 1 that means
  * only the interruption exists so it will be replaced with the new dialog. Otherwise,
  * the interruption will stay on the stack and ensure that ResumeReason.reprompt is
@@ -470,6 +509,7 @@ systemLib.dialog(consts.DialogId.ConfirmCancel, [
  * dialogArgs: { 
  *      dialogId: string; 
  *      dialogArgs?: any;
+ *      isRootDialog?: boolean;
  * }
  */
 systemLib.dialog(consts.DialogId.Interruption, [
@@ -485,3 +525,34 @@ systemLib.dialog(consts.DialogId.Interruption, [
     }
 ]);
 
+
+/**
+ * Prompts the user to disambiguate between multiple routes that were troggered.
+ * dialogArgs: { 
+ *      prompt: string|string[]|IMessage|IIsMessage;
+ *      choices: IDisambiguateChoices;
+ *      options?: IPromptsOptions;
+ * }
+ */
+systemLib.dialog(consts.DialogId.Disambiguate, [
+    function (session, args) {
+        // Prompt user
+        session.dialogData.choices = args.choices;
+        Prompts.choice(session, args.prompt, args.choices, args.options);
+    },
+    function (session, results) {
+        var route = session.dialogData.choices[results.response.entity];
+        if (route) {
+            // Pop ourselves off the stack
+            var stack = session.dialogStack();
+            stack.pop();
+            session.dialogStack(stack);
+
+            // Route to action
+            session.library.library(route.libraryName).selectRoute(session, route);
+        } else {
+            // Return with reprompt
+            session.endDialogWithResult({ resumed: ResumeReason.reprompt });
+        }
+    }
+]);
